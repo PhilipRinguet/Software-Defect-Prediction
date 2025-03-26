@@ -89,5 +89,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Contact
 For any questions, feel free to reach out:
 - **Email:** philipringuet@gmail.com
-- **GitHub:** [your-username](https://github.com/PhilipRinguet)
+- **GitHub:** [PhilipRinguet](https://github.com/PhilipRinguet)
 
