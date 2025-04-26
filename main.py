@@ -1,139 +1,130 @@
-import argparse
 import mlflow
-import logging
-from pathlib import Path
+import numpy as np
+import pandas as pd
+from scipy.io import arff
+from sklearn.model_selection import train_test_split
+import joblib
 
-from src.data.make_dataset import load_data, preprocess_data
-from src.features.build_features import select_features, handle_class_imbalance
-from src.models.train_model import optimize_hyperparameters, train_and_evaluate
-from src.visualization.visualize import (
-    plot_feature_distributions,
-    plot_correlation_matrix,
-    plot_precision_recall_curve,
-    plot_class_distribution
+from src.features.build_features import select_features, transform_features
+from src.models.train_model import (
+    create_svm_pipeline,
+    create_brf_pipeline,
+    create_xgb_pipeline,
+    train_and_evaluate,
+    train_with_optimization
 )
+from src.utils.config import load_config
 
-def setup_logging(log_path='logs'):
-    """Set up logging configuration."""
-    Path(log_path).mkdir(exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(f'{log_path}/sdp.log'),
-            logging.StreamHandler()
-        ]
-    )
-
-def run_pipeline(args):
-    """Run the complete software defect prediction pipeline."""
-    logger = logging.getLogger(__name__)
-    logger.info("Starting software defect prediction pipeline")
+def load_and_prepare_data(config):
+    """Load and prepare the JM1 and KC1 datasets"""
+    datasets = []
+    for dataset in config['data']['datasets']:
+        data_path = f"{config['data']['raw_data_path']}/{dataset}.arff"
+        data, _ = arff.loadarff(data_path)
+        df = pd.DataFrame(data)
+        
+        # Lowercase column names
+        df.columns = df.columns.str.lower()
+        
+        # Rename target columns consistently
+        if 'label' in df.columns:
+            df.rename(columns={"label": "target"}, inplace=True)
+        elif 'defective' in df.columns:
+            df.rename(columns={"defective": "target"}, inplace=True)
+        
+        # Convert target to numeric
+        df["target"] = df["target"].str.decode("utf-8")
+        df["target"] = np.where(df["target"] == "Y", 1, 0)
+        datasets.append(df)
     
-    # Start MLflow run
-    with mlflow.start_run():
-        # Load and preprocess data
-        logger.info("Loading and preprocessing data")
-        jm1_df, kc1_df = load_data(
-            jm1_path=args.jm1_path,
-            kc1_path=args.kc1_path
-        )
-        
-        # Generate initial visualizations
-        if args.visualize:
-            logger.info("Generating initial visualizations")
-            plot_class_distribution(jm1_df['target'], 
-                                 save_path='reports/figures/jm1_class_dist.png')
-            plot_class_distribution(kc1_df['target'],
-                                 save_path='reports/figures/kc1_class_dist.png')
-            plot_correlation_matrix(jm1_df.drop('target', axis=1),
-                                save_path='reports/figures/correlation_matrix.png')
-        
-        # Preprocess data
-        X_train, X_test, y_train, y_test, transformer = preprocess_data(
-            jm1_df, kc1_df, test_size=args.test_size
-        )
-        
-        # Feature engineering
-        logger.info("Performing feature engineering")
-        X_train_selected, X_test_selected, selected_features = select_features(
-            X_train, y_train, X_test, k=args.n_features
-        )
-        
-        # Handle class imbalance
-        logger.info("Handling class imbalance")
-        X_train_balanced, y_train_balanced = handle_class_imbalance(
-            X_train_selected, y_train,
-            method=args.resampling_method
-        )
-        
-        # Optimize hyperparameters if requested
-        if args.optimize:
-            logger.info("Optimizing hyperparameters")
-            best_params, best_score = optimize_hyperparameters(
-                X_train_balanced, X_test_selected,
-                y_train_balanced, y_test,
-                model_type=args.model_type,
-                n_trials=args.n_trials
-            )
-            logger.info(f"Best parameters: {best_params}")
-            logger.info(f"Best validation score: {best_score}")
-        else:
-            best_params = None
-        
-        # Train and evaluate model
-        logger.info("Training and evaluating model")
-        model, metrics = train_and_evaluate(
-            X_train_balanced, X_test_selected,
-            y_train_balanced, y_test,
-            model_type=args.model_type,
-            params=best_params
-        )
-        
-        # Log metrics
-        for metric_name, value in metrics.items():
-            logger.info(f"{metric_name}: {value:.3f}")
-            mlflow.log_metric(metric_name, value)
-        
-        # Generate evaluation visualizations
-        if args.visualize:
-            logger.info("Generating evaluation visualizations")
-            y_prob = model.predict_proba(X_test_selected)[:, 1]
-            plot_precision_recall_curve(
-                y_test, y_prob,
-                save_path='reports/figures/precision_recall_curve.png'
-            )
+    # Combine datasets
+    combined_data = pd.concat(datasets, ignore_index=True)
+    return combined_data
 
 def main():
-    """Main entry point for the application."""
-    parser = argparse.ArgumentParser(
-        description='Software Defect Prediction Pipeline'
+    """Main execution function"""
+    # Load configuration
+    config = load_config()
+    
+    # Set up MLflow
+    mlflow.set_experiment(config['mlflow']['experiment_name'])
+    
+    # Load and prepare data
+    data = load_and_prepare_data(config)
+    
+    # Split features and target
+    X = data.drop("target", axis=1)
+    y = data["target"]
+    
+    # Create train/test split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, 
+        test_size=config['data']['test_size'],
+        stratify=y, 
+        random_state=config['data']['random_state']
     )
     
-    parser.add_argument('--jm1-path', type=str, default='data/raw/jm1.arff',
-                      help='Path to JM1 dataset')
-    parser.add_argument('--kc1-path', type=str, default='data/raw/kc1.arff',
-                      help='Path to KC1 dataset')
-    parser.add_argument('--model-type', type=str, default='svm',
-                      choices=['logistic', 'svm', 'balanced_rf', 'xgboost'],
-                      help='Type of model to train')
-    parser.add_argument('--test-size', type=float, default=0.3,
-                      help='Proportion of dataset to use for testing')
-    parser.add_argument('--n-features', type=int, default=10,
-                      help='Number of features to select')
-    parser.add_argument('--resampling-method', type=str, default='adasyn',
-                      choices=['smote', 'adasyn'],
-                      help='Method for handling class imbalance')
-    parser.add_argument('--optimize', action='store_true',
-                      help='Whether to perform hyperparameter optimization')
-    parser.add_argument('--n-trials', type=int, default=100,
-                      help='Number of optimization trials')
-    parser.add_argument('--visualize', action='store_true',
-                      help='Whether to generate visualizations')
+    # Feature selection
+    X_train_selected, X_test_selected, selected_features = select_features(X_train, y_train, X_test)
     
-    args = parser.parse_args()
-    setup_logging()
-    run_pipeline(args)
+    # Define models to train
+    model_configs = {
+        "SVM-RBF": {"type": "svm", "beta": config['training']['metrics']['beta']},
+        "BRF": {"type": "rf", "beta": config['training']['metrics']['beta']},
+        "XGBoost": {"type": "xgb", "beta": config['training']['metrics']['beta']}
+    }
+    
+    results = {}
+    for name, model_config in model_configs.items():
+        print(f"\nOptimizing {name}...")
+        pipeline, best_params, best_score = train_with_optimization(
+            X_train_selected,
+            y_train,
+            model_type=model_config["type"],
+            cv=config['training']['optimization']['cv_folds'],
+            n_trials=config['training']['optimization']['n_trials'],
+            timeout=config['training']['optimization']['timeout'],
+            features=selected_features
+        )
+        
+        print(f"Best validation score: {best_score:.3f}")
+        print("Best parameters:", best_params)
+        
+        # Evaluate on test set
+        _, metrics, threshold = train_and_evaluate(
+            pipeline,
+            X_train_selected,
+            X_test_selected,
+            y_train,
+            y_test,
+            name,
+            model_config["beta"]
+        )
+        
+        results[name] = {
+            "metrics": metrics,
+            "threshold": threshold,
+            "best_params": best_params,
+            "best_val_score": best_score
+        }
+        
+        # Save best model (SVM-RBF)
+        if name == "SVM-RBF":
+            print("\nSaving best model...")
+            joblib.dump(pipeline, "pipeline_svm_rbf.pkl")
+    
+    # Print final results
+    print("\nModel Comparison Results:")
+    print("-" * 50)
+    for name, result in results.items():
+        print(f"\n{name}:")
+        print(f"Precision: {result['metrics']['precision']:.3f}")
+        print(f"Recall: {result['metrics']['recall']:.3f}")
+        print(f"F-beta Score: {result['metrics']['f_beta']:.3f}")
+        print(f"PR-AUC: {result['metrics'].get('pr_auc', 'N/A')}")
+        print(f"Optimal Threshold: {result['threshold']:.3f}")
+        print(f"Best Validation Score: {result['best_val_score']:.3f}")
+        print("Best Parameters:", result['best_params'])
 
 if __name__ == "__main__":
     main()
