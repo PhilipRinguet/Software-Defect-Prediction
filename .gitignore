@@ -23,6 +23,7 @@ wheels/
 # Jupyter Notebook
 .ipynb_checkpoints
 Software_Defect_Prediction.ipynb
+README.txt
 
 # Virtual Environment
 venv/

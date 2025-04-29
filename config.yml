@@ -125,3 +125,18 @@ mlflow:
 features:
   transform_method: 'yeo-johnson'
   standardize: true
+
+# Visualization settings
+visualization:
+  output_dir: 'reports/figures'
+  dpi: 300
+  formats: ['png', 'pdf']
+  style: 'whitegrid'
+  figure_sizes:
+    default: [10, 6]
+    correlation_matrix: [12, 8]
+    feature_importance: [12, 6]
+    metrics_comparison: [20, 6]
+  colors:
+    primary_palette: 'viridis'
+    categorical_palette: 'Set2'

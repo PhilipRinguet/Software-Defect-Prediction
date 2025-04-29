@@ -1,7 +1,15 @@
-import numpy as np
-import mlflow
+"""Model training utilities."""
+import os
 import joblib
-from sklearn.metrics import precision_score, recall_score, fbeta_score, average_precision_score
+import mlflow
+import numpy as np
+from sklearn.metrics import (
+    precision_score, 
+    recall_score, 
+    fbeta_score, 
+    average_precision_score,
+    precision_recall_curve
+)
 from sklearn.preprocessing import StandardScaler, PowerTransformer
 from sklearn.pipeline import Pipeline
 from imblearn.pipeline import Pipeline as ImbPipeline
@@ -11,8 +19,18 @@ from imblearn.ensemble import BalancedRandomForestClassifier
 from xgboost import XGBClassifier
 
 from src.features.build_features import ColumnSelector, transform_features
-from src.utils.config import load_config, get_model_config
+from src.models.metrics import (
+    calculate_basic_metrics,
+    calculate_threshold_metrics,
+    calculate_detailed_metrics
+)
+from src.utils.config import load_config
 from .optimize import optimize_svm, optimize_rf, optimize_xgb
+
+def get_model_config(model_type):
+    """Get model configuration from config file."""
+    config = load_config()
+    return config['models'].get(model_type, {})
 
 def create_svm_pipeline(kernel='rbf', C=1.0, gamma='scale', probability=True, 
                        class_weight='balanced', sampling=None, features=None):
@@ -111,102 +129,80 @@ def create_xgb_pipeline(features=None, max_depth=2, learning_rate=0.003,
 def train_with_optimization(X_train, y_train, model_type='svm', cv=5, 
                           n_trials=50, timeout=3600, features=None):
     """Train model with hyperparameter optimization"""
-    if model_type == 'svm':
-        best_params, best_score = optimize_svm(X_train, y_train, cv, n_trials, timeout)
-        pipeline = create_svm_pipeline(
-            C=best_params['C'],
-            gamma=best_params['gamma'],
-            sampling=best_params['sampling'],
-            features=features
-        )
-    elif model_type == 'rf':
-        best_params, best_score = optimize_rf(X_train, y_train, cv, n_trials, timeout)
-        pipeline = create_brf_pipeline(
-            features=features,
-            n_estimators=best_params['n_estimators'],
-            max_depth=best_params['max_depth'],
-            sampling_strategy=best_params['sampling_strategy'],
-            min_samples_split=best_params['min_samples_split'],
-            min_samples_leaf=best_params['min_samples_leaf']
-        )
-    elif model_type == 'xgb':
-        best_params, best_score = optimize_xgb(X_train, y_train, cv, n_trials, timeout)
-        pipeline = create_xgb_pipeline(
-            features=features,
-            max_depth=best_params['max_depth'],
-            learning_rate=best_params['learning_rate'],
-            n_estimators=best_params['n_estimators'],
-            subsample=best_params['subsample'],
-            colsample_bytree=best_params['colsample_bytree'],
-            gamma=best_params['gamma'],
-            reg_alpha=best_params['reg_alpha'],
-            reg_lambda=best_params['reg_lambda']
-        )
-    else:
-        raise ValueError(f"Unsupported model type: {model_type}")
-    
-    # Train the model
-    pipeline.fit(X_train, y_train)
-    return pipeline, best_params, best_score
-
-def calculate_metrics(y_true, y_pred, y_prob=None, beta=2.0):
-    """Calculate model performance metrics"""
-    metrics = {
-        'precision': precision_score(y_true, y_pred),
-        'recall': recall_score(y_true, y_pred),
-        'f_beta': fbeta_score(y_true, y_pred, beta=beta)
-    }
-    
-    if y_prob is not None:
-        metrics['pr_auc'] = average_precision_score(y_true, y_prob)
+    with mlflow.start_run(nested=True):
+        if model_type == 'svm':
+            best_params, best_score = optimize_svm(X_train, y_train, cv, n_trials, timeout)
+            pipeline = create_svm_pipeline(
+                C=best_params['C'],
+                gamma=best_params['gamma'],
+                sampling=best_params['sampling'],
+                features=features
+            )
+        elif model_type == 'rf':
+            best_params, best_score = optimize_rf(X_train, y_train, cv, n_trials, timeout)
+            pipeline = create_brf_pipeline(
+                features=features,
+                n_estimators=best_params['n_estimators'],
+                max_depth=best_params['max_depth'],
+                sampling_strategy=best_params['sampling_strategy'],
+                min_samples_split=best_params['min_samples_split'],
+                min_samples_leaf=best_params['min_samples_leaf']
+            )
+        elif model_type == 'xgb':
+            best_params, best_score = optimize_xgb(X_train, y_train, cv, n_trials, timeout)
+            pipeline = create_xgb_pipeline(
+                features=features,
+                max_depth=best_params['max_depth'],
+                learning_rate=best_params['learning_rate'],
+                n_estimators=best_params['n_estimators'],
+                subsample=best_params['subsample'],
+                colsample_bytree=best_params['colsample_bytree'],
+                gamma=best_params['gamma'],
+                reg_alpha=best_params['reg_alpha'],
+                reg_lambda=best_params['reg_lambda']
+            )
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
         
-    return metrics
+        # Train the model
+        pipeline.fit(X_train, y_train)
+        
+        # Log optimization results
+        mlflow.log_params(best_params)
+        mlflow.log_metric("best_validation_score", best_score)
+        
+        return pipeline, best_params, best_score
 
-def find_optimal_threshold(y_true, y_prob, beta=2.0):
-    """Find optimal classification threshold using F-beta score"""
-    precisions = []
-    recalls = []
-    thresholds = np.linspace(0, 1, 100)
+def train_and_evaluate(pipeline, X_train, X_test, y_train, y_test, model_name):
+    """Train and evaluate a model pipeline."""
+    config = load_config()
+    beta = config['training']['metrics']['beta']
     
-    for threshold in thresholds:
-        y_pred = (y_prob >= threshold).astype(int)
-        precisions.append(precision_score(y_true, y_pred))
-        recalls.append(recall_score(y_true, y_pred))
-    
-    precisions = np.array(precisions)
-    recalls = np.array(recalls)
-    
-    # Calculate F-beta scores
-    f_beta_scores = ((1 + beta**2) * (precisions * recalls) / 
-                    ((beta**2 * precisions) + recalls + 1e-8))
-    
-    optimal_idx = f_beta_scores.argmax()
-    return thresholds[optimal_idx]
-
-def train_and_evaluate(pipeline, X_train, X_test, y_train, y_test, model_name, beta=2.0):
-    """Train model and evaluate performance"""
     # Train model
     pipeline.fit(X_train, y_train)
     
-    # Get predictions
+    # Get predictions and probabilities
+    y_pred = pipeline.predict(X_test)
     y_prob = pipeline.predict_proba(X_test)[:, 1]
     
-    # Find optimal threshold
-    optimal_threshold = find_optimal_threshold(y_train, 
-                                            pipeline.predict_proba(X_train)[:, 1],
-                                            beta=beta)
-    
-    # Get predictions using optimal threshold
-    y_pred = (y_prob >= optimal_threshold).astype(int)
-    
     # Calculate metrics
-    metrics = calculate_metrics(y_test, y_pred, y_prob, beta)
+    basic_metrics = calculate_basic_metrics(y_test, y_pred, y_prob, beta=beta)
+    threshold_metrics = calculate_threshold_metrics(y_test, y_prob, beta=beta)
+    detailed_metrics = calculate_detailed_metrics(y_test, y_pred, y_prob)
     
-    # Log with MLflow
-    with mlflow.start_run(run_name=model_name):
-        mlflow.log_params(pipeline.get_params())
-        mlflow.log_metrics(metrics)
-        mlflow.log_metric('optimal_threshold', optimal_threshold)
-        mlflow.sklearn.log_model(pipeline, "model")
+    # Combine metrics
+    metrics = {**basic_metrics, **detailed_metrics}
+    optimal_threshold = threshold_metrics['optimal_threshold']
+    
+    # Log metrics with MLflow
+    with mlflow.start_run(nested=True):
+        mlflow.log_metrics(basic_metrics)
+        mlflow.log_param('optimal_threshold', optimal_threshold)
+        
+        # Save model
+        model_path = f'models/{model_name.lower()}_model.pkl'
+        os.makedirs('models', exist_ok=True)
+        joblib.dump(pipeline, model_path)
+        mlflow.log_artifact(model_path)
     
     return pipeline, metrics, optimal_threshold

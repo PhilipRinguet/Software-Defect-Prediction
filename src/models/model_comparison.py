@@ -1,58 +1,93 @@
+"""Model comparison utilities."""
 import os
 import json
 import pandas as pd
-import numpy as np
-from sklearn.metrics import precision_score, recall_score, fbeta_score, average_precision_score
-
-def compare_models(models, X_test, y_test, output_dir=None):
-    """Compare multiple models on test data"""
-    comparison = ModelComparison(reports_dir=output_dir)
-    results = comparison.compare_models(models, X_test, y_test)
-    comparison.save_results()
-    return results
+from src.models.metrics import (
+    calculate_basic_metrics,
+    calculate_threshold_metrics,
+    calculate_detailed_metrics
+)
+from src.visualization.plotting import plot_manager
+from src.visualization.visualize import (
+    plot_pr_curves,
+    plot_metrics_comparison,
+    plot_threshold_impact
+)
+from src.utils.config import load_config
 
 class ModelComparison:
     def __init__(self, reports_dir='reports/model_comparison'):
         self.reports_dir = reports_dir
         self.results = {}
         self.predictions = {}
+        self.config = load_config()
+        self.beta = self.config['training']['metrics']['beta']
     
-    def evaluate_model(self, model, X_test, y_test, beta=2.0):
-        """Evaluate a single model"""
+    def evaluate_model(self, model, X_test, y_test):
+        """Evaluate a single model."""
         y_pred = model.predict(X_test)
         y_prob = model.predict_proba(X_test)[:, 1]
         
-        metrics = {
-            'Precision': precision_score(y_test, y_pred),
-            'Recall': recall_score(y_test, y_pred),
-            'F-beta Score': fbeta_score(y_test, y_pred, beta=beta),
-            'PR-AUC': average_precision_score(y_test, y_prob)
-        }
+        # Calculate all metrics using our metrics module
+        basic_metrics = calculate_basic_metrics(y_test, y_pred, y_prob, beta=self.beta)
+        threshold_metrics = calculate_threshold_metrics(y_test, y_prob, beta=self.beta)
+        detailed_metrics = calculate_detailed_metrics(y_test, y_pred, y_prob)
         
-        return metrics
+        return {
+            'basic': basic_metrics,
+            'threshold': threshold_metrics,
+            'detailed': detailed_metrics,
+            'predictions': y_pred,
+            'probabilities': y_prob
+        }
     
     def compare_models(self, models, X_test, y_test):
-        """Compare multiple models on test data"""
+        """Compare multiple models on test data."""
         results = {}
-        predictions = {}
+        y_probs = {}
         
         for name, model in models.items():
             metrics = self.evaluate_model(model, X_test, y_test)
             results[name] = metrics
-            predictions[name] = model.predict_proba(X_test)[:, 1]
+            y_probs[name] = metrics['probabilities']
         
         self.results = results
-        self.predictions = predictions
-        return pd.DataFrame(results).T
+        self.predictions = y_probs
+        
+        # Generate and save comparison plots
+        plots = {
+            'pr_curves': plot_pr_curves(y_test, y_probs),
+            'metrics_comparison': plot_metrics_comparison(
+                {name: res['basic'] for name, res in results.items()}
+            )
+        }
+        
+        # Add individual threshold impact plots
+        for name, y_prob in y_probs.items():
+            plots[f'threshold_impact_{name}'] = plot_threshold_impact(y_test, y_prob)
+        
+        # Save all plots
+        plot_manager.save_plots(plots, subdir='model_comparison')
+        
+        # Create results DataFrame with basic metrics and thresholds
+        results_df = pd.DataFrame({
+            name: {
+                'Precision': res['basic']['precision'],
+                'Recall': res['basic']['recall'],
+                'F-beta Score': res['basic']['f_beta'],
+                'PR-AUC': res['basic']['pr_auc'],
+                'Optimal Threshold': res['threshold']['optimal_threshold']
+            }
+            for name, res in results.items()
+        }).T
+        
+        return results_df
     
     def save_results(self, results=None):
-        """Save comparison results"""
+        """Save comparison results."""
         os.makedirs(self.reports_dir, exist_ok=True)
-        
-        # Use provided results or instance results
         results_to_save = results if results is not None else self.results
         
-        # Convert to DataFrame if needed
         if not isinstance(results_to_save, pd.DataFrame):
             df = pd.DataFrame(results_to_save).T
         else:
@@ -77,7 +112,7 @@ class ModelComparison:
         return csv_path
     
     def load_results(self):
-        """Load saved comparison results"""
+        """Load saved comparison results."""
         json_path = os.path.join(self.reports_dir, 'model_comparison_results.json')
         if not os.path.exists(json_path):
             raise FileNotFoundError(f"Results file not found at {json_path}")
