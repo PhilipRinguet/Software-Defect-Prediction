@@ -129,6 +129,10 @@ def optimize_xgb(X_train, y_train, cv=5, n_trials=50, timeout=3600):
     config = get_model_config('xgboost')
     search_space = config['search_space']
     
+    # Calculate class weight for XGBoost
+    neg_count, pos_count = np.bincount(y_train)
+    scale_pos_weight = neg_count / pos_count
+    
     def objective(trial: Trial):
         params = {
             param: suggest_value(trial, param, config)
@@ -139,6 +143,7 @@ def optimize_xgb(X_train, y_train, cv=5, n_trials=50, timeout=3600):
             ('scaler', StandardScaler()),
             ('xgb', XGBClassifier(
                 **params,
+                scale_pos_weight=scale_pos_weight,  # Add class weight balancing
                 eval_metric='logloss',
                 random_state=42
             ))
@@ -153,7 +158,7 @@ def optimize_xgb(X_train, y_train, cv=5, n_trials=50, timeout=3600):
             n_jobs=-1
         )
         return scores.mean()
-
+    
     study = optuna.create_study(
         direction="maximize",
         pruner=optuna.pruners.MedianPruner(),

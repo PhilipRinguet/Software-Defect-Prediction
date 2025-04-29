@@ -100,7 +100,8 @@ def create_brf_pipeline(features=None, n_estimators=100, max_depth=2,
 
 def create_xgb_pipeline(features=None, max_depth=2, learning_rate=0.003, 
                        n_estimators=150, subsample=0.4, colsample_bytree=0.3,
-                       gamma=5.0, reg_alpha=125.0, reg_lambda=325.0):
+                       gamma=5.0, reg_alpha=125.0, reg_lambda=325.0,
+                       scale_pos_weight=1.0):
     """Create XGBoost pipeline"""
     config = get_model_config('xgboost')
     default_params = config.get('default_params', {})
@@ -120,6 +121,7 @@ def create_xgb_pipeline(features=None, max_depth=2, learning_rate=0.003,
         gamma=gamma or default_params.get('gamma', 5.0),
         reg_alpha=reg_alpha or default_params.get('reg_alpha', 125.0),
         reg_lambda=reg_lambda or default_params.get('reg_lambda', 325.0),
+        scale_pos_weight=scale_pos_weight,  # Handle class imbalance
         eval_metric='logloss',
         random_state=42
     )))
@@ -150,6 +152,9 @@ def train_with_optimization(X_train, y_train, model_type='svm', cv=5,
             )
         elif model_type == 'xgb':
             best_params, best_score = optimize_xgb(X_train, y_train, cv, n_trials, timeout)
+            # Calculate class weight for XGBoost
+            neg_count, pos_count = np.bincount(y_train)
+            scale_pos_weight = neg_count / pos_count
             pipeline = create_xgb_pipeline(
                 features=features,
                 max_depth=best_params['max_depth'],
@@ -159,7 +164,8 @@ def train_with_optimization(X_train, y_train, model_type='svm', cv=5,
                 colsample_bytree=best_params['colsample_bytree'],
                 gamma=best_params['gamma'],
                 reg_alpha=best_params['reg_alpha'],
-                reg_lambda=best_params['reg_lambda']
+                reg_lambda=best_params['reg_lambda'],
+                scale_pos_weight=scale_pos_weight  # Pass calculated weight
             )
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
