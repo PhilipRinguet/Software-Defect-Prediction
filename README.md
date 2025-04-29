@@ -1,93 +1,129 @@
-# Cross-Project Software Defect Prediction
+# Software Defect Prediction Project
 
-## Overview
-This project aims to predict software defects across different projects using machine learning techniques. The goal is to assess the transferability of defect prediction models trained on one dataset and applied to another. The project involves data preprocessing, feature engineering, model training, and evaluation using performance metrics relevant to software defect prediction.
+This project implements Cross-Project Software Defect Prediction (CPDP) using machine learning techniques. It uses data from NASA's Metrics Data Program (MDP) to predict software defects in target projects by leveraging data from multiple source projects.
 
-## Dataset
-We use the JM1 and KC1 datasets, which is are small and imbalanced datasets for defect prediction. Data preprocessing includes:
-- Handling missing values
-- Normalization
-- Feature selection
-- Addressing class imbalance using techniques such as SMOTE and ADASYN
+## Project Structure
 
-## Methodology
-1. **Data Preprocessing**
-   - Data cleaning and transformation
-   - Feature engineering
-   - Class balancing
-2. **Model Selection & Training**
-   - Logistic Regression, Support Vector Machine (SVM) with RBF Kernel, RandomForrest, XGBoost
-   - Hyperparameter tuning using Optuna
-   - Joint optimization of SMOTE and ADASYN
-3. **Evaluation Metrics**
-   - Precision, Recall, F1-Score
-   - ROC-AUC
-   - Confusion Matrix
-
-## Repository Structure
 ```
 ├── data
-│   ├── raw
-│   ├── processed
-├── notebooks
-│   ├── exploratory_data_analysis.ipynb
-│   ├── model_training.ipynb
-├── src
-│   ├── data_processing.py
-│   ├── train_model.py
-│   ├── evaluate.py
-├── results
-│   ├── model_performance_metrics.csv
-├── README.md
+│   ├── raw            # Raw ARFF files from NASA MDP
+│   └── processed      # Processed and transformed data
+├── models             # Trained and serialized models
+├── notebooks          # Jupyter notebooks for exploration
+├── reports
+│   └── figures        # Generated plots and visualizations
+├── src               
+│   ├── data          # Data loading and preprocessing
+│   ├── features      # Feature engineering
+│   ├── models        # Model training and prediction
+│   └── visualization # Visualization utilities
+└── tests             # Unit tests
 ```
 
 ## Installation
-1. Clone the repository:
+
+1. Clone this repository
+2. Create a virtual environment (recommended)
+3. Install dependencies:
    ```bash
-   git clone https://github.com/PhilipRinguet/Software-Defect-Prediction.git
-   ```
-2. Navigate to the project directory:
-   ```bash
-   cd cross-project-defect-prediction
-   ```
-3. Create a virtual environment and install dependencies:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
    pip install -r requirements.txt
    ```
 
 ## Usage
-Run data preprocessing:
+
+The main script provides a command-line interface to run the complete pipeline:
+
 ```bash
-python src/data_processing.py
-```
-Train the model:
-```bash
-python src/train_model.py
-```
-Evaluate the model:
-```bash
-python src/evaluate.py
+python main.py --model-type svm --optimize --visualize
 ```
 
-## Results & Analysis
-- Model performance is analyzed using precision, recall, and F1-score.
-- Performance comparison across different datasets is provided.
-- The impact of hyperparameter tuning is visualized.
+Key Arguments:
+- `--model-type`: Choose from 'logistic', 'svm', 'balanced_rf', 'xgboost'
+- `--optimize`: Enable hyperparameter optimization
+- `--visualize`: Generate visualizations
+- `--resampling-method`: Choose from 'smote' or 'adasyn' for handling class imbalance
+- `--n-features`: Number of features to select
+
+For full list of options:
+```bash
+python main.py --help
+```
+
+## Features
+
+- Data preprocessing with Yeo-Johnson transformation
+- Feature selection using mutual information
+- Class imbalance handling with SMOTE/ADASYN
+- Multiple model options (SVM, Balanced Random Forest, XGBoost)
+- Hyperparameter optimization using Optuna
+- Experiment tracking with MLflow
+- Comprehensive visualizations
+
+## Model Performance
+
+Models are evaluated using:
+- Precision
+- Recall
+- F-beta Score (β=2)
+- PR-AUC
+
+Performance metrics are logged using MLflow and can be viewed in the MLflow UI:
+```bash
+mlflow ui
+```
+
+## Testing
+
+Run the test suite:
+```bash
+python -m unittest discover tests
+```
 
 ## Contributing
-Contributions are welcome! To contribute:
+
 1. Fork the repository
-2. Create a new branch (`feature-new`)
+2. Create your feature branch
 3. Commit your changes
-4. Open a Pull Request
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
+
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Contact
-For any questions, feel free to reach out:
-- **Email:** philipringuet@gmail.com
-- **GitHub:** [PhilipRinguet](https://github.com/PhilipRinguet)
+## Model Comparison
 
+### Running Model Comparisons
+
+1. Run the comparison script to evaluate all models:
+   ```bash
+   python src/models/run_model_comparison.py
+   ```
+   This will:
+   - Train all model configurations (Logistic Regression, SVM variants, Random Forest, XGBoost)
+   - Evaluate models using multiple metrics (Precision, Recall, F-beta Score, PR-AUC)
+   - Save results to the reports directory
+   - Log runs in MLflow for experiment tracking
+
+2. View results and visualizations:
+   ```bash
+   jupyter notebook notebooks/model_comparison_results.ipynb
+   ```
+   This notebook provides:
+   - Comparative analysis of model performance
+   - Visualization of metrics across models
+   - Model ranking and recommendations
+
+### Model Configurations Tested:
+- Logistic Regression with feature selection
+- SVM with balanced class weights
+- SVM with SMOTE resampling
+- SVM with ADASYN resampling
+- Balanced Random Forest
+- XGBoost
+
+### Evaluation Metrics:
+- Precision
+- Recall
+- F-beta Score (β=2)
+- PR-AUC (Precision-Recall Area Under Curve)

@@ -1,0 +1,127 @@
+# Data settings
+data:
+  raw_data_path: 'data/raw'
+  processed_data_path: 'data/processed'
+  datasets:
+    - 'jm1'
+    - 'kc1'
+  test_size: 0.2
+  random_state: 42
+
+# Model configurations
+models:
+  svm:
+    default_params:
+      kernel: 'rbf'
+      C: 1.0
+      gamma: 'scale'
+      probability: true
+      class_weight: 'balanced'
+    sampling:
+      method: 'adasyn'  # options: ['smote', 'adasyn', null]
+      sampling_strategy: 0.8
+      neighbors: 3
+    search_space:
+      C: 
+        type: 'loguniform'
+        low: 0.001
+        high: 1000.0
+      gamma:
+        type: 'loguniform'
+        low: 0.00001
+        high: 10.0
+      sampling:
+        type: 'categorical'
+        choices: ['smote', 'adasyn', null]
+
+  random_forest:
+    default_params:
+      n_estimators: 100
+      max_depth: 2
+      sampling_strategy: 0.7
+      min_samples_split: 15
+      min_samples_leaf: 20
+    search_space:
+      n_estimators:
+        type: 'int'
+        low: 50
+        high: 300
+      max_depth:
+        type: 'int'
+        low: 2
+        high: 32
+      sampling_strategy:
+        type: 'float'
+        low: 0.5
+        high: 1.0
+      min_samples_split:
+        type: 'int'
+        low: 2
+        high: 20
+      min_samples_leaf:
+        type: 'int'
+        low: 1
+        high: 20
+
+  xgboost:
+    default_params:
+      max_depth: 2
+      learning_rate: 0.003
+      n_estimators: 150
+      subsample: 0.4
+      colsample_bytree: 0.3
+      gamma: 5.0
+      reg_alpha: 125.0
+      reg_lambda: 325.0
+    search_space:
+      max_depth:
+        type: 'int'
+        low: 1
+        high: 9
+      learning_rate:
+        type: 'loguniform'
+        low: 0.0001
+        high: 0.1
+      n_estimators:
+        type: 'int'
+        low: 50
+        high: 500
+      subsample:
+        type: 'float'
+        low: 0.2
+        high: 1.0
+      colsample_bytree:
+        type: 'float'
+        low: 0.2
+        high: 1.0
+      gamma:
+        type: 'loguniform'
+        low: 0.001
+        high: 100.0
+      reg_alpha:
+        type: 'loguniform'
+        low: 0.01
+        high: 1000.0
+      reg_lambda:
+        type: 'loguniform'
+        low: 0.01
+        high: 1000.0
+
+# Training settings
+training:
+  optimization:
+    n_trials: 50
+    timeout: 3600  # in seconds
+    cv_folds: 5
+  metrics:
+    beta: 2.0  # for F-beta score
+
+# MLflow settings
+mlflow:
+  tracking_uri: './mlruns'
+  experiment_name: 'Default'
+
+# Feature engineering
+features:
+  transform_method: 'yeo-johnson'
+  standardize: true
